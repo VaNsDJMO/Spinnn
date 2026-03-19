@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dejumo Store - Fixed Voucher</title>
+    <style>
+        :root { --ink: #1e293b; --paper: #f8fafc; --line: #cbd5e1; --accent: #22c55e; --blue: #3b82f6; --red: #ef4444; }
+        body { margin: 0; font-family: 'Courier New', Courier, monospace; background: #0f172a; display: flex; justify-content: center; padding: 10px; }
+        .notebook { width: 100%; max-width: 450px; background: var(--paper); border-radius: 5px; box-shadow: 12px 12px 0px var(--accent); padding: 30px 20px; position: relative; background-image: linear-gradient(var(--line) 1px, transparent 1px); background-size: 100% 28px; line-height: 28px; color: var(--ink); border: 1px solid #ddd; }
+        .header-box { border: 2px solid var(--ink); padding: 10px; margin-bottom: 20px; font-weight: bold; text-align: center; }
+        .daily-box { border: 1px solid var(--ink); display: inline-block; padding: 0 10px; float: right; font-size: 0.8rem; background: white; z-index: 5; position: relative; }
+        .wheel-container { position: relative; width: 300px; height: 300px; margin: 40px auto; border: 6px solid var(--ink); border-radius: 50%; background: white; }
+        .wheel-canvas { width: 100%; height: 100%; transition: transform 5s cubic-bezier(0.15, 0, 0.2, 1); border-radius: 50%; }
+        .arrow { position: absolute; top: -25px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 18px solid transparent; border-right: 18px solid transparent; border-top: 35px solid var(--red); z-index: 20; }
+        button { background: white; border: 2px solid var(--ink); padding: 8px 20px; font-weight: bold; cursor: pointer; }
+        .hidden { display: none !important; }
+        #admin-auth, #admin-dashboard { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--paper); z-index: 100; padding: 25px; box-sizing: border-box; overflow-y: auto; }
+        .admin-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 15px; }
+        .admin-table th, .admin-table td { border: 1px solid var(--line); padding: 6px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="notebook">
+    <div id="user-view">
+        <div class="daily-box">DAILY: <span id="timer">--:--:--</span></div>
+        <div class="header-box">DEJUMO STORE</div>
+        <div style="font-weight: bold;">Points: <span id="pts-display">0</span></div>
+        <div class="wheel-container">
+            <div class="arrow"></div>
+            <canvas id="user-canvas" class="wheel-canvas" width="500" height="500"></canvas>
+        </div>
+        <h3 id="user-msg" style="text-align: center;">Spin and Win!</h3>
+        <div style="text-align: center;">
+            <button id="spin-btn" onclick="handleSpin()">🎡 SPIN (10 PTS)</button>
+            <button id="claim-btn" class="hidden" onclick="handleClaim()" style="background: var(--accent); color: white;">COPY VOUCHER</button>
+        </div>
+        <div style="margin-top: 60px; font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 10px;">
+            <span onclick="openLogin()" style="cursor:pointer; color: #64748b;">[Admin Tools]</span>
+        </div>
+    </div>
+
+    <div id="admin-auth" class="hidden">
+        <h3>Admin Access</h3>
+        <input type="password" id="admin-pass" placeholder="Password" style="padding: 10px; width: 80%;">
+        <br><br>
+        <button onclick="checkPass()">Login</button>
+        <button onclick="closeAdmin()">Back</button>
+    </div>
+
+    <div id="admin-dashboard" class="hidden">
+        <h3 style="margin:0;">⚙️ Admin Controls</h3>
+        <div style="background: #f1f5f9; padding: 10px; margin: 10px 0; border-radius: 5px;">
+            <button onclick="addPoints(50)">+50 PTS (FOR TEST)</button>
+            <button onclick="resetEverything()" style="color:red;">HARD RESET ALL</button>
+        </div>
+        <table class="admin-table">
+            <thead><tr><th>Prize</th><th>Status</th><th>Stock</th></tr></thead>
+            <tbody id="admin-list"></tbody>
+        </table>
+        <br>
+        <button onclick="saveAdminSettings(); alert('Saved!');" style="width:100%; background: var(--accent); color:white;">SAVE SETTINGS</button>
+        <button onclick="closeAdmin()" style="width:100%; margin-top:5px;">LOGOUT</button>
+    </div>
+</div>
+
+<script>
+    // ANG MGA VOUCHER MO - SUNOD-SUNOD NA LALABAS
+    const VOUCHER_LIST = [
+        "DEJUMOPSWWFJ86C", "DEJUMOPSWZ4ZHUG", "DEJUMOPSWBZLP3J", 
+        "DEJUMOPSWV0E1RC", "DEJUMOPSW8RKVBX", "DEJUMOPSWUWXWJA", 
+        "DEJUMOPSW9B47Z0", "DEJUMOPSWW31T6Z", "DEJUMOPSWDPZVWX", "DEJUMOPSW1NPCZS"
+    ];
+
+    // INITIAL SETUP: Only Try Again (0) and 5 Mins (1) are active.
+    let rewards = JSON.parse(localStorage.getItem("dejumo_v3_config")) || [
+        { name: "Try Again", color: "#64748b", active: true, vouchers: [] },
+        { name: "5 Mins", color: "#22c55e", active: true, vouchers: [...VOUCHER_LIST] },
+        { name: "10 Mins", color: "#3b82f6", active: false, vouchers: [] },
+        { name: "30 Mins", color: "#a855f7", active: false, vouchers: [] },
+        { name: "1 Hour", color: "#f59e0b", active: false, vouchers: [] },
+        { name: "Jackpot", color: "#ef4444", active: false, vouchers: [] }
+    ];
+
+    let points = parseInt(localStorage.getItem("dejumo_v3_pts") || 20);
+    let lastClaim = parseInt(localStorage.getItem("dejumo_v3_daily") || Date.now());
+    let isSpinning = false;
+    let rotation = 0;
+    let wonIdx = null;
+
+    function draw() {
+        const ctx = document.getElementById("user-canvas").getContext("2d");
+        const arc = (2 * Math.PI) / rewards.length;
+        ctx.clearRect(0,0,500,500);
+        rewards.forEach((r, i) => {
+            ctx.beginPath(); ctx.fillStyle = r.color; ctx.moveTo(250, 250);
+            ctx.arc(250, 250, 250, i * arc, (i + 1) * arc); ctx.fill(); ctx.stroke();
+            ctx.save(); ctx.translate(250, 250); ctx.rotate(i * arc + arc / 2);
+            ctx.textAlign = "right"; ctx.fillStyle = "white"; ctx.font = "bold 25px Courier";
+            ctx.fillText(r.name, 230, 10); ctx.restore();
+        });
+    }
+
+    function handleSpin() {
+        if (isSpinning) return;
+        if (points < 10) return alert("Kulang points!");
+
+        // Pick between active rewards with stock or Try Again
+        const activePool = rewards.map((r, i) => (i === 0 || (r.active && r.vouchers.length > 0)) ? i : null).filter(v => v !== null);
+        wonIdx = activePool[Math.floor(Math.random() * activePool.length)];
+
+        points -= 10;
+        updateUI();
+        isSpinning = true;
+
+        const canv = document.getElementById("user-canvas");
+        const extra = 3600; 
+        const deg = (360 - (wonIdx * (360/rewards.length))) - (360/rewards.length/2) - 90;
+        rotation = rotation + extra + (deg - (rotation % 360));
+        
+        canv.style.transform = `rotate(${rotation}deg)`;
+        document.getElementById("user-msg").innerText = "Spinning...";
+        document.getElementById("claim-btn").classList.add("hidden");
+
+        setTimeout(() => {
+            isSpinning = false;
+            document.getElementById("user-msg").innerText = "Landed: " + rewards[wonIdx].name;
+            if (wonIdx !== 0) {
+                document.getElementById("claim-btn").classList.remove("hidden");
+                alert("CONGRATS! Panalo ka ng " + rewards[wonIdx].name);
+            }
+            saveToLocal();
+        }, 5100);
+    }
+
+    function handleClaim() {
+        if (wonIdx === null || wonIdx === 0) return;
+        const vList = rewards[wonIdx].vouchers;
+        if (vList.length === 0) return alert("Out of stock na boss!");
+
+        // .shift() grabs the FIRST one in the list (Sunod-sunod)
+        const code = vList.shift();
+        
+        navigator.clipboard.writeText(code).then(() => {
+            alert("COPIED SUCCESS: " + code + "\n\nI-enter sa portal. PM sa main WiFi if error!");
+            document.getElementById("claim-btn").classList.add("hidden");
+            saveToLocal();
+            renderAdmin();
+        });
+    }
+
+    // --- ADMIN ---
+    function openLogin() { document.getElementById("admin-auth").classList.remove("hidden"); }
+    function closeAdmin() { document.getElementById("admin-auth").classList.add("hidden"); document.getElementById("admin-dashboard").classList.add("hidden"); }
+    function checkPass() { if (document.getElementById("admin-pass").value === "stonecold") { document.getElementById("admin-dashboard").classList.remove("hidden"); renderAdmin(); } }
+    
+    function renderAdmin() {
+        const b = document.getElementById("admin-list"); b.innerHTML = "";
+        rewards.forEach((r, i) => {
+            b.innerHTML += `<tr>
+                <td>${r.name}</td>
+                <td><button onclick="rewards[${i}].active=!rewards[${i}].active; renderAdmin(); draw();">${r.active?'ON':'OFF'}</button></td>
+                <td>${r.vouchers.length}</td>
+            </tr>`;
+        });
+    }
+
+    function addPoints(n) { points += n; updateUI(); saveToLocal(); }
+    function resetEverything() { localStorage.clear(); location.reload(); }
+    function saveAdminSettings() { saveToLocal(); }
+
+    function updateTimer() {
+        const diff = (24*60*60*1000) - (Date.now() - lastClaim);
+        if (diff <= 0) {
+            document.getElementById("timer").innerText = "READY!";
+            if (lastClaim < Date.now() - 5000) { points += 10; lastClaim = Date.now(); saveToLocal(); }
+        } else {
+            const h = Math.floor(diff/3600000); const m = Math.floor((diff%3600000)/60000); const s = Math.floor((diff%60000)/1000);
+            document.getElementById("timer").innerText = `${h}:${m}:${s}`;
+        }
+    }
+
+    function updateUI() { document.getElementById("pts-display").innerText = points; }
+    function saveToLocal() {
+        localStorage.setItem("dejumo_v3_config", JSON.stringify(rewards));
+        localStorage.setItem("dejumo_v3_pts", points);
+        localStorage.setItem("dejumo_v3_daily", lastClaim);
+        updateUI();
+    }
+
+    draw();
+    updateUI();
+    setInterval(updateTimer, 1000);
+</script>
+</body>
+</html>
